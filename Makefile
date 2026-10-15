@@ -15,30 +15,39 @@ APP_PRELOAD := $(OUTDIR)/cve-2026-43499-app.so
 APP_RELEASE := $(OUTDIR)/cve-2026-43499-app.release.so
 APP_RELEASE_OPT := -Oz -fvisibility=hidden -fno-semantic-interposition
 APP_RELEASE_SIZE := 104128
+
+# Keep the original legacy engine for previously published payload profiles.
+# S926BXXUHEZIF gets the pinned TraceFS-capable engine from pascua28.
+ENGINE_DIR := src
+ifeq ($(TARGET),e2s-S926BXXUHEZIF)
+ENGINE_DIR := src/engines/pascua28-20261015
+APP_RELEASE_SIZE := 262144
+endif
+ENGINE_HEADERS := $(ENGINE_DIR)/common.h $(wildcard $(ENGINE_DIR)/kernelsnitch/*.h)
 ROOT_HELPER := $(OUTDIR)/cve-2026-43499-root
 
 PRELOAD_SRCS := \
-  src/main.c \
-  src/util.c \
-  src/slide.c \
-  src/fops.c \
-  src/pipe.c \
-  src/root.c \
-  src/preload.c
+  $(ENGINE_DIR)/main.c \
+  $(ENGINE_DIR)/util.c \
+  $(ENGINE_DIR)/slide.c \
+  $(ENGINE_DIR)/fops.c \
+  $(ENGINE_DIR)/pipe.c \
+  $(ENGINE_DIR)/root.c \
+  $(ENGINE_DIR)/preload.c
 
 APP_PRELOAD_SRCS := \
-  src/main.c \
-  src/util.c \
-  src/slide_app.c \
-  src/fops.c \
-  src/pipe.c \
-  src/root.c \
-  src/preload.c
+  $(ENGINE_DIR)/main.c \
+  $(ENGINE_DIR)/util.c \
+  $(ENGINE_DIR)/slide_app.c \
+  $(ENGINE_DIR)/fops.c \
+  $(ENGINE_DIR)/pipe.c \
+  $(ENGINE_DIR)/root.c \
+  $(ENGINE_DIR)/preload.c
 
 COMMON_CFLAGS := \
   -O2 -g0 -Wall -Wextra \
   -Wno-unused-parameter -Wno-sign-compare \
-  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"'
+  -I$(ENGINE_DIR) -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"'
 
 .DEFAULT_GOAL := all
 
@@ -51,23 +60,23 @@ release: $(APP_RELEASE)
 $(OUTDIR):
 	mkdir -p $@
 
-$(PRELOAD): $(PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
+$(PRELOAD): $(PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h $(ENGINE_HEADERS) | $(OUTDIR)
 	$(TARGET_CC) -fPIC $(COMMON_CFLAGS) $(PRELOAD_SRCS) \
 	  -shared -pthread -o $@
 
 $(ROOT_HELPER): src/su_daemon.c | $(OUTDIR)
 	$(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra $< -ldl -o $@
 
-$(APP_PRELOAD): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
+$(APP_PRELOAD): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h $(ENGINE_HEADERS) | $(OUTDIR)
 	$(TARGET_CC) -DAPP_PAYLOAD=1 -fPIC $(COMMON_CFLAGS) $(APP_PRELOAD_SRCS) \
 	  -shared -pthread -o $@
 
-$(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
+$(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h $(ENGINE_HEADERS) | $(OUTDIR)
 	$(TARGET_CC) -DAPP_PAYLOAD=1 -fPIC $(APP_RELEASE_OPT) -g0 \
 	  -fno-unwind-tables -fno-asynchronous-unwind-tables \
 	  -ffunction-sections -fdata-sections \
 	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
-	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
+	  -I$(ENGINE_DIR) -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
 	  -Wl,--gc-sections -Wl,--icf=all -s -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
@@ -76,6 +85,7 @@ $(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h s
 info:
 	@echo "TARGET=$(TARGET)"
 	@echo "TARGET_CC=$(TARGET_CC)"
+	@echo "ENGINE_DIR=$(ENGINE_DIR)"
 	@echo "PRELOAD=$(PRELOAD)"
 	@echo "APP_PRELOAD=$(APP_PRELOAD)"
 	@echo "APP_RELEASE=$(APP_RELEASE)"
